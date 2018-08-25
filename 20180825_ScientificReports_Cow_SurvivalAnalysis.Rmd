@@ -1,0 +1,148 @@
+---
+title: "Bovine telomere dynamics and the association between telomere length and productive lifespan- Survival analysis"
+author: "Luise Seeker"
+date: "Wednesday, October 19, 2016"
+output: html_document
+---
+
+```{r}
+library(ggplot2)
+library(survival)
+library(survminer)
+library(nlme)
+library(lme4)
+library(lattice)
+library(plotrix)
+library(RColorBrewer)
+library(plyr)
+```
+
+
+```{r}
+#read in data for survivla analysis
+data<- read.csv("C:/Users/lseeker/Documents/PhD/GitHub/ScientificReportsData/Cattle_SurvivalDF.csv")
+
+
+names(data)
+
+
+# I can't publish the ear tags of the animals, but I originally used the ear tags in my analysis. 
+# Because it is easier to rename the column "recodedID" to "EAR_TAG" than changing "EAR_TAG" to "recodedID" in the code below, I did just that. But beware, recodedID are no ear tags. 
+colnames(data)[1] <- "EAR_TAG"
+
+names(data)
+
+nrow(data)
+
+```
+Coxph
+
+RTL at birth
+
+```{r}
+#RLTL as continuous variable
+data0<-subset(data, data$AGE_Y==0)
+nrow(data0)
+
+coxFit<-coxph(Surv(data0$Time_Years, data0$Event == 1)~data0$residRTL_plateRow)
+
+summary(coxFit)
+
+
+udata<-data0[!duplicated(data0$EAR_TAG),]
+nrow(udata)
+```
+
+RLTL at the age of 1 year
+
+```{r}
+data1<-subset(data, data$AGE_Y==1)
+
+nrow(data1)
+
+udata1<-data1[!duplicated(data1$EAR_TAG),]
+nrow(udata1)
+
+#RLTL as continuous variable
+coxFit<-coxph(Surv(data1$Time_Years, data1$Event == 1)~data1$residRTL_plateRow)
+
+summary(coxFit)
+
+data1b <- within(data1, tertile <- as.integer(cut(QC_RTL, quantile(QC_RTL, probs=0:3/3), include.lowest=TRUE)))
+
+fit<-survfit(Surv(data1b$Time_Years, data1b$Event == 1)~data1b$tertile)
+
+
+ggsurvplot(fit, data=data1b, legend.title = "Telomere length tertiles", legend.labs= c("short", "medium", "long"), xlab= "Time in years", pval=TRUE)
+
+```
+
+
+RLTL at the age of 2 years
+```{r}
+data2<-subset(data, data$AGE_Y==2)
+
+nrow(data2)
+
+udata2<-data2[!duplicated(data2$EAR_TAG),]
+nrow(udata2)
+
+
+#RLTL as continuous variable
+coxFit<-coxph(Surv(data2$Time_Years, data2$Event == 1)~data2$residRTL_plateRow)
+
+summary(coxFit)
+
+```
+
+
+
+RLTL at the age of 3 years
+```{r}
+data3<-subset(data, data$AGE_Y==3)
+
+nrow(data3)
+
+udata3<-data3[!duplicated(data3$EAR_TAG),]
+nrow(udata3)
+
+#RLTL as continuous variable
+coxFit<-coxph(Surv(data3$Time_Years, data3$Event == 1)~data3$residRTL_plateRow)
+
+summary(coxFit)
+
+```
+
+
+RLTL at the age of 4 years
+```{r}
+data4<-subset(data, data$AGE_Y==4)
+nrow(data4)
+
+udata4<-data4[!duplicated(data4$EAR_TAG),]
+nrow(udata4)
+
+#RLTL as continuous variable
+coxFit<-coxph(Surv(data4$Time_Years, data4$Event == 1)~data4$residRTL_plateRow)
+
+summary(coxFit)
+
+```
+
+RLTL at the age of 5 years
+```{r}
+data5<-subset(data, data$AGE_Y==5)
+
+nrow(data5)
+
+udata5<-data5[!duplicated(data5$EAR_TAG),]
+nrow(udata5)
+
+#RLTL as continuous variable
+coxFit<-coxph(Surv(data5$Time_Years, data5$Event == 1)~data5$residRTL_plateRow)
+
+summary(coxFit)
+
+
+```
+

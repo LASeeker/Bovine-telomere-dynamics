@@ -1,0 +1,469 @@
+---
+title: "Bovine telomere dynamics and the association between telomere length and productive lifespan"
+author: "Luise A. Seeker"
+date: "Thursday, April 06, 2017"
+output: html_document
+---
+
+This is the code with documentation to replicate the results based on the cow dataset presented in "Bovine telomere dynamics and their association with productive lifespan" 
+
+1) Load required packages:
+
+```{r}
+library(ggplot2)
+library(nlme)
+library(lme4)
+library(lmerTest)
+library(grid)
+library(gridExtra)
+library(mgcv) # for GAM
+library(data.table)
+library(stringr)
+
+#library(ggthemes)
+library(plyr)
+#library(lsmeans)
+#library(pbkrtest)
+library(effsize)
+```
+
+2) Read in input data frame:
+
+cow dataset
+```{r}
+data<-read.csv("C:/Users/lseeker/Documents/PhD/GitHub/ScientificReportsData/CattleData.csv")
+
+names(data)
+
+# I can't publish the ear tags of the animals, but I originally used the ear tags in my analysis. 
+# Because it is easier to rename the column "recodedID" to "EAR_TAG" than changing "EAR_TAG" to "recodedID" in the code below, I did just that. But beware, recodedID are no ear tags. 
+
+colnames(data)[1] <- "EAR_TAG"
+
+names(data)
+```
+
+3) descriptive analysis
+
+3.1.) cow dataset 
+The next section is exploratory. It answers the questions: How many measurements do be have? How variable is RLTL? Is RLTL data normally distributed?
+
+```{r}
+nrow(data) #equals number of RTL measurements
+
+# shows min, max, mean and median:
+summary(data$QC_RTL)
+
+# coefficient of variation
+CV<-sd(data$QC_RTL, na.rm=TRUE)/mean(data$QC_RTL, na.rm=TRUE)
+CV 
+
+
+# shows a histogram of RLTL measurements with superimposed normal distribution curve
+h<-hist(data$QC_RTL, col="blue", main="Histogram of RLTL", xlab="RLTL") 
+    
+
+# statistical tests for normal distribution of RTL measurements
+shapiro.test(data$QC_RTL)
+ks.test(data$QC_RTL, pnorm)
+qqnorm(data$QC_RTL)
+
+
+#RLTL data is not perfectly normal distributed (but close to). THerefore, they are log transformed and tests for normality are repeated:
+logTL<-log(data$QC_RTL)
+
+
+h2<-hist(logTL, col="red", main="Histogram of log transformed RLTL", xlab="RLTL") 
+
+
+# statistical tests for normal distribution of log transformed RTL measurements
+shapiro.test(logTL)
+ks.test(logTL, pnorm)
+qqnorm(logTL)
+```
+
+Log transformed RLTL data are closer to normality and will be used for statistical analyses. 
+
+Now it is checked, how many animals were in each feeding and genetic group:
+```{r}
+# creates data frame with only a single row for each animal (=EAR_TAG)
+udata<-data[!duplicated(data$EAR_TAG),]
+nrow(udata) #total number of animals in the complete cow data set
+
+count(udata$BirthYear)
+count(udata$BirthSeason)
+
+
+summary(udata$GENETIC_GROUP) # number of animals per genetic group
+summary(udata$FEED_GROUP)    # number of animasl in feeding groups
+
+#creates data frame that only contains animals of the selected line in feed group 1
+SLF<-subset(udata, udata$GENETIC_GROUP=="S" & udata$FEED_GROUP =="1")
+nrow(SLF) #number of selected cows in feed group 1
+
+#creates data frame that only contains animals of the selected line in feed group 2
+SHF<-subset(udata, udata$GENETIC_GROUP=="S" & udata$FEED_GROUP =="2")
+nrow(SHF) #number of selected cows in feed group 2
+
+#creates data frame that only contains animals of the selected line in NO feed group 
+SNull<-subset(udata, udata$GENETIC_GROUP=="S" & udata$FEED_GROUP =="NULL")
+nrow(SNull) #number of selected cows not allocated to a feed group
+
+#creates data frame that only contains animals of the control line in feed group 1
+CLF<-subset(udata, udata$GENETIC_GROUP=="C" & udata$FEED_GROUP =="1")
+nrow(CLF) #number of control cows in feed group 1
+
+#creates data frame that only contains animals of the control line in feed group 2
+CHF<-subset(udata, udata$GENETIC_GROUP=="C" & udata$FEED_GROUP =="2")
+nrow(CHF) #number of control cows in feed group 2
+
+#creates data frame that only contains animals of the control line in NO feed group 
+CNull<-subset(udata, udata$GENETIC_GROUP=="C" & udata$FEED_GROUP =="NULL")
+nrow(CNull) #number of control cows not allocated to a feed group
+
+#why were some animals not in feeding groups? Did they all die before reaching first lactation?
+NG<-subset(udata, udata$FEED_GROUP == "NULL")
+nrow(NG)
+summary(as.numeric(paste(NG$PL)))
+summary(as.numeric(paste(NG$HERD_LIFE)))
+#No! That's not the reason. They reached an age that is too old to support that theory.
+
+nrow(SLF)+nrow(SHF)+nrow(CLF)+nrow(CHF) #number of animals in feed and genetic groups
+
+
+#culling depending on genetic or feed group?
+
+S<-subset(data, data$GENETIC_GROUP == "S")
+nrow(S)
+C<-subset(data, data$GENETIC_GROUP == "C")
+nrow(C)
+
+S<-subset(S, S$HERD_LIFE != "NULL")
+nrow(S)
+
+C<-subset(C, C$HERD_LIFE != "NULL")
+nrow(C)
+
+uS<-S[!duplicated(S$EAR_TAG),]
+nrow(uS)
+uC<-C[!duplicated(C$EAR_TAG),]
+nrow(uC)
+
+t.test(as.numeric(paste(uS$HERD_LIFE)), as.numeric(paste(uC$HERD_LIFE)),var.equal = TRUE)
+
+#There is no statistically significant difference in productive lifespan between the two genetic groups.
+
+LF<-subset(data, data$FEED_GROUP == 1)
+nrow(LF)
+HF<-subset(data, data$FEED_GROUP == 2)
+nrow(HF)
+
+LF<-subset(LF, LF$HERD_LIFE != "NULL")
+nrow(LF)
+
+HF<-subset(HF, HF$HERD_LIFE != "NULL")
+nrow(HF)
+
+uLF<-LF[!duplicated(LF$EAR_TAG),]
+nrow(uLF)
+uHF<-HF[!duplicated(HF$EAR_TAG),]
+nrow(uHF)
+
+t.test(as.numeric(paste(uLF$HERD_LIFE)), as.numeric(paste(uHF$HERD_LIFE)),var.equal = TRUE)
+
+#There is no statistically significant difference in productive lifespan between the two feeding groups.
+
+
+
+```
+
+To explore the data further, I am plotting some histograms
+```{r}
+#number of samples at specific ages measured in days:
+m <- ggplot(data, aes(x=AGE_D)) +geom_histogram(bins=15, color= "black", fill="gold1")+ xlab("Age in days")+theme_gray(20)+guides(fill=F) + annotate("text", x = 2100, y = 280, label = "(A)",size=9, fontface = "bold")
+m
+
+#birth weight of the animals
+n <- ggplot(udata, aes(x=BIRTH_WGT)) +geom_histogram(bins=15, color= "black", fill="turquoise2")+ xlab("Birth weight in kg")+theme_gray(20)+guides(fill=F)+ annotate("text", x = 56, y = 62, label = "(B)",size=9, fontface = "bold")
+n
+
+#Live weigth
+W<-as.numeric(paste(data$LIVE_WGT))
+o <- ggplot(data, aes(x=W)) +geom_histogram(bins=10, color= "black", fill="deeppink1")+ xlab("Weight in kg")+theme_gray(20)+guides(fill=F)+ annotate("text", x = 585, y = 18, label = "(C)",size=9, fontface = "bold")
+o
+
+# samples per animal
+df<-data.frame(data$EAR_TAG)
+
+count.dups <- function(DF){
+
+  DT <- data.table(DF)
+  DT[,.N, by = names(DT)]
+}
+samplePerAnimal<-count.dups(df) 
+
+
+p <- ggplot(samplePerAnimal, aes(x=N)) +geom_histogram(bins=8, color= "black", fill="chartreuse")+ xlab("Samples per animal")+theme_gray(20)+guides(fill=F)+ annotate("text", x = 7.5, y = 95, label = "(D)",size=9, fontface = "bold")
+p
+
+
+#Herd life (time from birth to death in days)
+q <- ggplot(udata, aes(x=as.numeric(paste(udata$HERD_LIFE)))) +geom_histogram(bins=15, color= "black", fill="hotpink1")+ xlab("Life span")+theme_gray(20)+guides(fill=F) + annotate("text", x = 2700, y = 32, label = "(E)",size=12, fontface = "bold")+xlim(0,3050)
+q
+
+
+
+grid.arrange(m,n,o,p, q, nrow=2)
+
+    
+```
+Here, I was interested, how many animals had how many samples:
+```{r}
+single<-subset(samplePerAnimal, samplePerAnimal$N ==1)
+nrow(single)
+#after quality control three animals have no longer longitudinal samples...
+
+two<-subset(samplePerAnimal, samplePerAnimal$N ==2)
+nrow(two)
+
+three<-subset(samplePerAnimal, samplePerAnimal$N ==3)
+nrow(three)
+
+four<-subset(samplePerAnimal, samplePerAnimal$N ==4)
+nrow(four)
+
+five<-subset(samplePerAnimal, samplePerAnimal$N ==5)
+nrow(five)
+
+six<-subset(samplePerAnimal, samplePerAnimal$N ==6)
+nrow(six)
+
+seven<-subset(samplePerAnimal, samplePerAnimal$N ==7)
+nrow(seven)
+
+eight<-subset(samplePerAnimal, samplePerAnimal$N ==8)
+nrow(eight)
+```
+
+Reasons for culling and survival analysis
+
+REASON FOR DEATH
+
+How many animals died from which reason?
+```{r}
+dData<-subset(data, data$CULL_DATE!= "NULL")
+nrow(dData)# numberof samples of dead animals
+duData<-dData[!duplicated(dData$EAR_TAG),]
+nrow(duData) # total number of animals with cull date
+
+summary(duData$CULL_REASON)
+summary(duData$CULL_GROUP)
+
+#adds column for involuntary vs. voluntary culling
+duData$CULL_Reason_Group <- ifelse(duData$CULL_REASON == "OTHER/SURPLUS" | duData$CULL_REASON == "NOT SERVED - POLICY" ,"Voluntary", ifelse(duData$CULL_REASON == "NULL" | duData$CULL_REASON == "UNKNOWN" | duData$CULL_REASON == "REASON NOT GIVEN", "Unrecorded", "Involuntary"))
+                                                                                                                                                     
+summary(as.factor(duData$CULL_Reason_Group))
+```
+
+4) plots of RLTL measurements over age:
+
+```{r}
+
+# plot shows log(RTL) over age in days of animals 
+AgeP<-ggplot(data, aes(x=AGE_D, y=log(QC_RTL)))+ geom_point(size=2)+ xlab("Age in days")+ ylab("log(RLTL)")+theme_gray(20)+ylim(-0.5,0.5)
+AgeP
+
+
+# plot shows log(RTL) over age in days of animals 
+AgeP3<-ggplot(data, aes(x=AGE_D, y=log(data$QC_RTL)))+ geom_point(size=2)+ xlab("Age in days")+ ylab("log(RLTL)")+theme_gray(20)+ stat_smooth(method = "loess", formula = y ~ x, size = 1, colour = "red")+ylim(-0.5, 0.5)
+AgeP3
+
+
+# box and whisker plot with log(RLTL), age rounded to years
+AgeInYears<-as.factor(data$AGE_Y)
+
+
+boxPlot2<-ggplot(data, aes(x=AgeInYears, y = log(QC_RTL), fill=AgeInYears), na.action=na.exclude) + geom_boxplot(outlier.colour=NA,notch=F) + geom_jitter(shape=21,colour="black", size=1.5) + xlab("Age in years")+ylab("log(RLTL)")+theme_gray(20)+guides(fill=F)+ylim(-0.5, 0.5)
+
+boxPlot2
+
+
+
+AgeInMonths<-as.factor(data$AGE_M)
+
+boxPlot2<-ggplot(data, aes(x=AgeInMonths, y = log(data$QC_RTL), fill=AgeInYears), na.action=na.exclude) + geom_boxplot(outlier.colour=NA,notch=F) + geom_jitter(shape=21,colour="black", size=1.5) + xlab("Age in months")+ylab("log(RLTL)")+theme_gray(20)+guides(fill=F)+ylim(-0.5, 0.5)
+
+boxPlot2
+
+```
+
+
+
+5) Mixed models for the analysis of RLTL
+
+First a null model is fitted that only contains the animal as random effect and qPCR plate and row as fixed effects. This model is used to compare all other models to that have an additional fixed effect of age added. Different functions of age are considered.
+
+```{r}
+mod0<-lmer(log(data$QC_RTL)~as.factor(data$Plate) + as.factor(data$Row) + (1|as.factor(data$EAR_TAG)), na.action=na.exclude)
+
+#summary(mod0)
+anova(mod0)
+
+#calculate the repeatability for the null model
+mod0out<-as.data.frame(VarCorr(mod0),comp=c("Variance", "Std.Dev."))
+repET<-mod0out[1,4]/sum(mod0out[1:nrow(mod0out), 4])
+repET 
+
+AIC(logLik(mod0))
+```
+
+Age in days is tested as fixed effect:
+```{r}
+#Model1 
+mod1<-lmer(log(data$QC_RTL)~ as.factor(data$Plate) + as.factor(data$Row)+ data$AGE_D + as.factor(data$BirthYear) + (1|as.factor(data$EAR_TAG)), na.action=na.exclude)
+
+#summary(mod1)
+anova(mod1)
+
+anova(mod0, mod1) #compares model to null model
+
+
+AIC(logLik(mod1))
+
+
+#linear polynomial
+
+mod1lin<-lmer(log(data$QC_RTL)~ as.factor(data$Plate) + as.factor(data$Row)+ poly(data$AGE_D,1) + as.factor(data$BirthYear) + (1|as.factor(data$EAR_TAG)), na.action=na.exclude)
+
+#summary(mod1)
+anova(mod1lin)
+
+anova(mod0, mod1lin) #compares model to null model
+
+
+AIC(logLik(mod1lin))
+
+anova(mod1, mod1lin)
+
+```
+
+Because the relationship between RLTL and age seems not to be linear for the cow group, polynomials of increasing order are fitted as functions of age in days to capture the dynamics better. 
+
+```{r}
+#Model2: second order (quadratic) polynomial
+mod2<-lmer(log(data$QC_RTL)~ as.factor(data$Plate) + as.factor(data$Row)+ poly(data$AGE_D,2) + as.factor(data$BirthYear)+ (1|as.factor(data$EAR_TAG)), na.action=na.exclude)
+
+#summary(mod2)
+anova(mod2)
+
+anova(mod0, mod2) 
+
+AIC(logLik(mod2))
+
+```
+
+```{r}
+#Model3: third order polynomial
+mod3<-lmer(log(data$QC_RTL)~ as.factor(data$Plate) + as.factor(data$Row)+ poly(data$AGE_D,3) + as.factor(data$BirthYear)+ (1|as.factor(data$EAR_TAG)), na.action=na.exclude)
+
+anova(mod3)
+
+anova(mod0, mod3)
+
+AIC(logLik(mod3))
+
+```
+
+```{r}
+#Model4: forth order polynomial
+mod4<-lmer(log(data$QC_RTL)~ as.factor(data$Plate) + as.factor(data$Row)+ poly(data$AGE_D,4) + as.factor(data$BirthYear)+ (1|as.factor(data$EAR_TAG)), na.action=na.exclude)
+
+anova(mod4)
+
+anova(mod0, mod4)
+
+AIC(logLik(mod4))
+```
+
+
+
+
+```{r}
+#age as factor with two levels: level 1 are measurments within the first two months of live, level 2 are measurements at the age of 6 months or later
+
+mod5<-lmer(log(data$QC_RTL)~ as.factor(data$Plate) + as.factor(data$Row)+ as.factor(data$AgeGr)+ data$BirthYear + (1|as.factor(data$EAR_TAG)), na.action=na.exclude)
+
+anova(mod5)
+
+anova(mod0, mod5)
+
+AIC(logLik(mod5))
+```
+To find the ideal cutoff age for a factor with two levels all possible cutoffs are tested:
+```{r}
+i=1
+j=1
+
+df<-data.frame()
+
+for (i in 1:75){
+ data$newcol<-0
+ colnames(data)[which(names(data) == "newcol")] <- paste("M", i, sep="_")
+ data[,ncol(data)] <- ifelse(data$AGE_M <i, 1, 2)
+ mod<-lmer(log(data$QC_RTL)~ as.factor(data$Plate) + as.factor(data$Row)+ as.factor(data$BirthYear)+ as.factor(data[,ncol(data)]) + (1|as.factor(data$EAR_TAG)), na.action=na.exclude)
+ x<-anova(mod0, mod)
+ y<-as.data.frame(x["AIC"])
+ z<-y[2,1]
+ df[j, 1]<-z
+ i<-i+1
+ j=j+1
+}
+
+
+names(df)<-"AIC"
+df$AGE_M<-c(1:75)
+
+sdf<-df[order(df$AIC),]
+
+sdf
+
+#to save this dataframe:
+#write.csv(sdf, "C:/Users/lseeker/Documents/PhD/Stage1_Experiment/07_Analysis/03_ExploreNewDF/20180110_AgeAsFactorTestCutOff.csv")
+
+
+#best fitting model is where the factor for age describes animals that are younger or >= 1 month of age:
+
+modFin<-lmer(log(data$QC_RTL)~ as.factor(data$Plate) + as.factor(data$Row)+  as.factor(data$BirthYear) + as.factor(data$M_1) + (1|as.factor(data$EAR_TAG)), na.action=na.exclude)
+
+summary(modFin)
+anova(modFin)
+
+AIC(logLik(modFin))
+
+anova(mod0, modFin)
+
+modFinout<-as.data.frame(VarCorr(modFin),comp=c("Variance", "Std.Dev."))
+repET<-modFinout[1,4]/sum(modFinout[1:nrow(modFinout), 4])
+repET 
+
+x<-coef(summary(modFin))
+dfx<-as.data.frame(x)
+
+#write.csv(dfx, "C:/Users/lseeker/Documents/PhD/Stage1_Experiment/07_Analysis/03_ExploreNewDF/20180110_FixedEffSize.csv")
+
+
+
+# calculate R2 for final model:
+r2.corr.mer <- function(m) {
+  lmfit <-  lm(model.response(model.frame(m)) ~ fitted(m))
+  summary(lmfit)$r.squared
+}
+
+r2.corr.mer(modFin)
+
+1-var(residuals(modFin))/(var(model.response(model.frame(modFin))))
+
+
+```
+
+ 
